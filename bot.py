@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from cogs.helpers.SimplePointsManager import PointsManagerSingleton
+from helpers.SimplePointsManager import PointsManagerSingleton
 from cogs import EXTENSIONS
 
 intents = discord.Intents.default()
