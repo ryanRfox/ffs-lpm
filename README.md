@@ -22,7 +22,7 @@ This demo showcases the integration between Discord and DRIP's points management
 ### Environment Variables
 Create a `.env` file with:
 ```env
-DISCORD_TOKEN=your_discord_bot_token
+TOKEN=your_discord_bot_token
 API_BASE_URL=https://api.drip.re
 API_KEY=your_drip_api_key
 REALM_ID=your_drip_realm_id

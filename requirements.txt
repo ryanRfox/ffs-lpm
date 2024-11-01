@@ -2,4 +2,4 @@ aiohttp
 aiosqlite
 discord.py
 python-dotenv
-jishaku==2.5.0
+jishaku==2.6.0
