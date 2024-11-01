@@ -30,7 +30,7 @@ REALM_ID=your_drip_realm_id
 
 Discord token is the token of the bot, you can get one by creating an app and then generating a token. [GUIDE](https://discord.com/developers/docs/quick-start/getting-started#step-1-creating-an-app)
 
-DRIP API key and realm ID can be found in the [DRIP API dashboard](https://dashboard.drip.re/api/extended-api).
+DRIP API key and realm ID can be found in your DRIP Admin channel in the server you want to use.
 
 ### Installation
 1. Clone the repository
