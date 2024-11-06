@@ -128,7 +128,7 @@ class DiscordBot(commands.Bot):
         await super().close()
 
 
-load_dotenv()
+load_dotenv(override= True)
 
 bot = DiscordBot()
 bot.run(os.getenv("TOKEN"))
