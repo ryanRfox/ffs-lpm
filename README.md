@@ -1,17 +1,112 @@
-# DRIP Points System Demo
-A Discord bot demonstration showcasing DRIP's points management API capabilities.
+# Discord Prediction Market Bot
 
-## Overview
-This demo showcases the integration between Discord and DRIP's points management API. It demonstrates how easily developers can integrate DRIP's token system into their Discord applications, providing basic economy features through simple slash commands.
+A Discord bot that enables server members to create and participate in prediction markets using a points-based system. Users can create predictions, place bets on different outcomes, and win points based on correct predictions.
 
 ## Features
-- **Balance Checking**: Query DRIP point balances directly through Discord
-- **Tipping System**: Enable user-to-user DRIP point transfers
-- **Administrative Controls**: Server management of DRIP points
-- **DRIP API Integration**: Seamless connection with DRIP's token system
-- **Error Handling**: Robust error checking and user feedback
-- **Resource Management**: Efficient API session handling
 
+- Create prediction markets with multiple options
+- Place bets on active predictions
+- Automatic market closure and resolution system
+- Category-based organization
+- Odds calculation and display
+- Automatic refund system for unresolved predictions
+- User notifications for bet outcomes
+
+## Commands
+
+### `/create_prediction`
+Creates a new prediction market.
+- Parameters:
+  - `question`: The main question or topic of the prediction
+  - `duration`: How long the prediction will remain open (in minutes)
+  - `options`: Comma-separated list of possible outcomes
+  - `category` (optional): Category to organize predictions
+
+Example:
+```
+/create_prediction question:"Will it rain tomorrow?" duration:1440 options:"Yes,No" category:"Weather"
+```
+### `/bet`
+Place a bet on an active prediction.
+1. Select a category
+2. Choose a prediction
+3. Select an option to bet on
+4. Enter the amount to bet
+
+The bot will show current odds and your potential payout before confirming the bet.
+
+### `/list_predictions`
+Displays all predictions, organized into categories:
+- 🟢 Active Markets: Currently open for betting
+- 🟡 Pending Resolution: Betting closed, awaiting resolution
+- ⭐ Resolved Markets: Completed predictions with results
+- 💰 Refunded Markets: Predictions that were refunded
+
+Each prediction shows:
+- Question
+- Category
+- Total betting pool
+- Current odds
+- Time remaining/ended
+- Winner (for resolved predictions)
+
+### `/resolve_prediction`
+Resolve a prediction by selecting the winning outcome.
+- Only available to the prediction creator
+- Must be used within 48 hours of prediction end time
+- Automatically distributes winnings to successful bettors
+
+## Automatic Features
+
+### Market Closure
+- Markets automatically close after the specified duration
+- Creator is notified when betting period ends
+- Creator has 48 hours to resolve the prediction
+
+### Refund System
+- If a prediction isn't resolved within 48 hours of closing:
+  - All bets are automatically refunded
+  - Users are notified of the refund
+  - Market is marked as refunded
+
+### Notifications
+Users receive direct messages for:
+- Winning bets (showing profit and total payout)
+- Losing bets (showing amount lost)
+- Refunded bets
+- Market resolution requirements (for creators)
+
+## Points System
+- Users must have sufficient points to place bets
+- Winning payouts are calculated based on odds
+- Points are automatically transferred when:
+  - Placing bets
+  - Receiving winnings
+  - Getting refunds
+
+## Best Practices
+
+### Creating Predictions
+- Use clear, unambiguous questions
+- Provide distinct, mutually exclusive options
+- Set appropriate durations for the type of prediction
+- Use categories to organize related predictions
+
+### Betting
+- Check current odds before betting
+- Consider the total pool size
+- Monitor remaining time before market closure
+- Review your betting history to improve strategy
+
+### Resolution
+- Resolve predictions promptly after the outcome is known
+- Ensure fair and accurate resolution based on verifiable results
+- Consider setting up clear resolution criteria when creating predictions
+
+## Notes
+- All times are displayed in UTC
+- Odds are updated in real-time as bets are placed
+- Bot requires administrator permissions to manage predictions
 ## Setup
 
 ### Prerequisites
@@ -42,113 +137,4 @@ pip install -r requirements.txt
 4. Run the bot:
 ```bash
 python bot.py
-```
-
-## Command Usage
-
-### User Commands
-1. **Check DRIP Balance**
-   ```
-   /balance
-   ```
-   - Shows your current DRIP point balance
-   - Response is private
-
-2. **Check Other's Balance**
-   ```
-   /check <user>
-   ```
-   - Shows another user's DRIP balance
-
-3. **Tip DRIP Points**
-   ```
-   /tip <user> <amount>
-   ```
-   - Transfer DRIP points to another user
-   - Requires sufficient balance
-   - Amount must be positive
-
-### Admin Commands
-1. **Add DRIP Points**
-   ```
-   /add_points <user> <amount>
-   ```
-   - Adds DRIP points to a user
-   - Requires administrator permissions
-
-2. **Remove DRIP Points**
-   ```
-   /remove_points <user> <amount>
-   ```
-   - Removes DRIP points from a user
-   - Requires administrator permissions
-
-## DRIP API Integration
-
-### Endpoints
-The demo utilizes the following DRIP API endpoints:
-
-1. **Balance Check**
-   ```
-   GET /api/v4/realms/{realm_id}/members/{user_id}
-   ```
-   Returns user's DRIP point balance
-
-2. **Point Modification**
-   ```
-   PATCH /api/v4/realms/{realm_id}/members/{user_id}/tokenBalance
-   ```
-   Modifies user's DRIP point balance
-
-3. **Point Transfer**
-   ```
-   PATCH /api/v4/realms/{realm_id}/members/{user_id}/transfer
-   ```
-   Handles user-to-user DRIP point transfers
-
-### Authentication
-Uses DRIP's API key authentication:
-```python
-headers = {"Authorization": f"Bearer {api_key}"}
-```
-
-## Technical Implementation
-
-### DRIP Points Manager
-Implements a singleton pattern for managing DRIP API connections:
-```python
-class PointsManagerSingleton:
-    """
-    Manages DRIP API connections and point operations.
-    Ensures efficient resource usage through singleton pattern.
-    """
-```
-
-### Key Features
-- Secure API key handling
-- Efficient session management
-- Comprehensive error handling
-- User-friendly responses
-- Permission-based access control
-
-## Example Interactions
-
-### Regular Users
-```
-/balance
-> Your DRIP balance: 1,000 Points
-
-/tip @user 100
-> Successfully tipped 100 DRIP Points to @user!
-```
-
-### Administrators
-```
-/add_points @user 500
-> Successfully added 500 DRIP Points to @user!
-> Their new balance: 1,500 Points
-
-/remove_points @user 200
-> Successfully removed 200 DRIP Points from @user!
-> Their new balance: 1,300 Points
 ```
