@@ -129,36 +129,61 @@ class Economy(commands.Cog):
                 print(f"Failed to send error message: {str(e)}")
 
     async def schedule_prediction_resolution(self, prediction: Prediction):
-        await asyncio.sleep((prediction.end_time - datetime.datetime.utcnow()).total_seconds())
-        if not prediction.resolved:
-            # Mark the prediction as refunded
+        try:
+            # Wait for betting period to end
+            time_until_betting_ends = (prediction.end_time - datetime.datetime.utcnow()).total_seconds()
+            if time_until_betting_ends > 0:
+                print(f"DEBUG: Waiting {time_until_betting_ends} seconds for betting to end")
+                await asyncio.sleep(time_until_betting_ends)
+            
+            # Don't proceed if already resolved
+            if prediction.resolved:
+                print("DEBUG: Prediction already resolved before betting end")
+                return
+                
+            print(f"DEBUG: Betting period ended for {prediction.question}")
+            
+            # Notify creator that betting period has ended
+            try:
+                creator = await self.bot.fetch_user(prediction.creator_id)
+                await creator.send(
+                    f"🎲 Betting has ended for your prediction: '{prediction.question}'\n"
+                    f"Please use `/resolve_prediction` to resolve the market.\n"
+                    f"If not resolved within 48 hours, all bets will be automatically refunded."
+                )
+                print(f"DEBUG: Sent notification to creator {prediction.creator_id}")
+            except Exception as e:
+                print(f"DEBUG: Error notifying creator: {e}")
+
+            # Wait 48 hours
+            print("DEBUG: Starting 48-hour wait")
+            await asyncio.sleep(48 * 3600)  # 48 hours in seconds
+            
+            # Check if resolved during wait
+            if prediction.resolved:
+                print("DEBUG: Prediction resolved during 48-hour wait")
+                return
+                
+            print("DEBUG: Starting auto-refund process")
+            
+            # If we reach here, it's time to auto-refund
             prediction.mark_as_refunded()
             
-            # Return all bets to users if market expired without resolution
+            # Return all bets to users
             for option in prediction.bets:
                 for user_id, amount in prediction.bets[option].items():
                     await self.points_manager.add_points(user_id, amount)
-                    # Notify user about refund
                     try:
                         user = await self.bot.fetch_user(user_id)
                         await user.send(
                             f"💰 Your bet of {amount:,} Points has been refunded for the expired market:\n"
                             f"'{prediction.question}'"
                         )
-                    except (discord.Forbidden, discord.NotFound):
-                        pass  # Skip if can't DM user
                     except Exception as e:
-                        print(f"Error sending refund notification to user {user_id}: {e}")
-            
-            # Notify channel about market expiration
-            channel = self.bot.get_channel(YOUR_CHANNEL_ID)  # Replace with your channel ID
-            if channel:
-                await channel.send(
-                    f"The prediction '{prediction.question}' has ended! "
-                    f"All bets have been returned to users. "
-                    f"Admins, please resolve it using `/resolve_prediction`. "
-                    f"Options were: {', '.join(prediction.options)}"
-                )
+                        print(f"DEBUG: Error sending refund notification: {e}")
+                    
+        except Exception as e:
+            print(f"DEBUG: Error in schedule_prediction_resolution: {e}")
 
     @app_commands.guild_only()
     @app_commands.command(name="bet", description="Place a bet on a prediction")
@@ -431,28 +456,28 @@ class Economy(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"An error occurred: {str(e)}", ephemeral=True)
 
-    async def resolve_prediction(self, prediction: Prediction):
-        channel = self.bot.get_channel(YOUR_CHANNEL_ID)  # Replace with your channel ID
-        if not channel:
-            return
-
-        if not prediction.resolved:
-            await channel.send(f"The prediction '{prediction.question}' has ended! Admins, please resolve it using `/resolve_prediction`. Options were: {', '.join(prediction.options)}")
-
     @app_commands.guild_only()
     @app_commands.command(name="resolve_prediction", description="Resolve a prediction")
     async def resolve_prediction_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
-        # Change to only show unresolved predictions
-        unresolved_predictions = [pred for pred in self.predictions if not pred.resolved]
+        # Only show unresolved predictions created by this user
+        unresolved_predictions = [
+            pred for pred in self.predictions 
+            if not pred.resolved and pred.creator_id == interaction.user.id
+        ]
         
         if not unresolved_predictions:
-            await interaction.followup.send("No unresolved predictions at the moment.", ephemeral=True)
+            await interaction.followup.send(
+                "You don't have any unresolved predictions to resolve. "
+                "Only the creator of a prediction can resolve it.", 
+                ephemeral=True
+            )
             return
 
         class PredictionSelect(discord.ui.Select):
-            def __init__(self, predictions):
+            def __init__(self, predictions, cog):
+                self.cog = cog
                 options = [
                     discord.SelectOption(
                         label=prediction.question, 
@@ -460,7 +485,6 @@ class Economy(commands.Cog):
                         value=str(index)
                     )
                     for index, prediction in enumerate(predictions)
-                    if not prediction.resolved  # Extra safety check
                 ]
                 super().__init__(placeholder="Select a prediction to resolve...", min_values=1, max_values=1, options=options)
 
@@ -468,9 +492,10 @@ class Economy(commands.Cog):
                 selected_index = int(self.values[0])
                 selected_prediction = unresolved_predictions[selected_index]
 
-                # Create a Select menu for choosing the winning option
                 class ResultSelect(discord.ui.Select):
-                    def __init__(self, prediction):
+                    def __init__(self, prediction, cog):
+                        self.prediction = prediction
+                        self.cog = cog
                         options = [
                             discord.SelectOption(label=option, value=option)
                             for option in prediction.options
@@ -479,17 +504,17 @@ class Economy(commands.Cog):
 
                     async def callback(self, interaction: discord.Interaction):
                         result = self.values[0]
-                        if not selected_prediction.resolve(result):
+                        if not self.prediction.resolve(result):
                             await interaction.response.send_message("This prediction has already been resolved!", ephemeral=True)
                             return
 
                         # Distribute payouts and notify winners
-                        total_payout = selected_prediction.get_total_bets()
-                        winning_users = selected_prediction.bets[result].items()
+                        total_payout = self.prediction.get_total_bets()
+                        winning_users = self.prediction.bets[result].items()
                         
                         # Process payouts and notifications for winners
                         for user_id, original_bet in winning_users:
-                            payout = selected_prediction.get_user_payout(user_id)
+                            payout = self.prediction.get_user_payout(user_id)
                             if payout > 0:
                                 payout_amount = int(payout)
                                 await self.cog.points_manager.add_points(user_id, payout_amount)
@@ -498,53 +523,38 @@ class Economy(commands.Cog):
                                 try:
                                     user = await self.cog.bot.fetch_user(user_id)
                                     await user.send(
-                                        f"🎉 You won {profit:,} Points on '{selected_prediction.question}'!\n"
+                                        f"🎉 You won {profit:,} Points on '{self.prediction.question}'!\n"
                                         f"Bet: {original_bet:,} → Payout: {payout_amount:,}"
                                     )
-                                except (discord.Forbidden, discord.NotFound):
-                                    print(f"Could not send winning notification to user {user_id}")
                                 except Exception as e:
                                     print(f"Error sending winning notification to user {user_id}: {e}")
 
                         # Notify losing users
-                        for option, bets in selected_prediction.bets.items():
+                        for option, bets in self.prediction.bets.items():
                             if option != result:  # This is a losing option
                                 for user_id, bet_amount in bets.items():
                                     try:
                                         user = await self.cog.bot.fetch_user(user_id)
                                         await user.send(
-                                            f"❌ You lost {bet_amount:,} Points on '{selected_prediction.question}'.\n"
+                                            f"❌ You lost {bet_amount:,} Points on '{self.prediction.question}'.\n"
                                             f"The winning option was: {result}"
                                         )
-                                    except (discord.Forbidden, discord.NotFound):
-                                        print(f"Could not send losing notification to user {user_id}")
                                     except Exception as e:
                                         print(f"Error sending losing notification to user {user_id}: {e}")
 
                         await interaction.response.send_message(
-                            f"Prediction '{selected_prediction.question}' resolved with result: '{result}'. "
+                            f"Prediction '{self.prediction.question}' resolved with result: '{result}'. "
                             f"Payouts have been distributed.", 
                             ephemeral=True
                         )
 
-                # Send a message to select the winning option
-                class ResultSelectView(discord.ui.View):
-                    def __init__(self, prediction, cog):
-                        super().__init__()
-                        select = ResultSelect(prediction)
-                        select.cog = cog
-                        self.add_item(select)
+                view = discord.ui.View()
+                view.add_item(ResultSelect(selected_prediction, self.cog))
+                await interaction.response.send_message("Please select the winning option:", view=view, ephemeral=True)
 
-                await interaction.response.send_message("Please select the winning option:", view=ResultSelectView(selected_prediction, self.cog), ephemeral=True)
-
-        class PredictionSelectView(discord.ui.View):
-            def __init__(self, predictions, cog):
-                super().__init__()
-                select = PredictionSelect(predictions)
-                select.cog = cog
-                self.add_item(select)
-
-        await interaction.followup.send("Please select a prediction to resolve:", view=PredictionSelectView(unresolved_predictions, self))
+        view = discord.ui.View()
+        view.add_item(PredictionSelect(unresolved_predictions, self))
+        await interaction.followup.send("Please select a prediction to resolve:", view=view, ephemeral=True)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Economy(bot))
