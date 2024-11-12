@@ -90,7 +90,7 @@ class Economy(commands.Cog):
     )
     async def create_prediction(self, interaction: discord.Interaction, question: str, duration: int, options: str, category: str = None):
         # Immediately acknowledge the interaction
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         
         try:
             # Process options
