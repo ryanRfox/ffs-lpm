@@ -1,4 +1,4 @@
-# Discord Prediction Market Bot
+# Discord Prediction Market Bot- LowPolyMarket
 
 A Discord bot that enables server members to create and participate in prediction markets using a points-based system. Users can create predictions, place bets on different outcomes, and win points based on correct predictions.
 
@@ -11,6 +11,36 @@ A Discord bot that enables server members to create and participate in predictio
 - Odds calculation and display
 - Automatic refund system for unresolved predictions
 - User notifications for bet outcomes
+
+## Target Group
+
+- The everyday Mezo Community that wants exposure to Prediction Markets without having to use their crypto or fiat
+- The degens who want to bet on anything and everything
+- People who want to simply place fun bets with friends over random things
+
+## Unique Value Proposition
+
+- A highly engaging bot that allows users to speculate/ play without fear of losing a big bag
+- Gives the community power to essentially create fun mini-games in a sense
+- Brings about commraderie by allowing users to make bets on some of their favorite community members
+
+## Next Steps/ Milestones
+
+- We would like for the UI/UX to be cleaner and better looking
+- Hit a 100k different transactions on our bot
+- Hit 100 different and unique Prediction Market categories
+
+## Requirements from Drip and Mezo
+
+- Help with streamlining the bot and creating a better UI/UX
+- Integrating emojis and gifs for certain results from Markets to provide more fun
+
+## Team
+
+- Patrick Anderson, Peteya2, Buildooor
+- Vazzy, Supreme Testooor
+- Ryan Fox, Dev Rel, GitHub Guru
+- Sonny Monroe, Code Specialist
 
 ## Commands
 
