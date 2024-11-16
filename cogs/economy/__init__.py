@@ -84,11 +84,18 @@ class Economy(commands.Cog):
     @app_commands.command(name="create_prediction", description="Create a new prediction market")
     @app_commands.describe(
         question="The question for the prediction",
-        duration="Duration of the prediction in minutes",
+        duration="Duration format: days,hours,minutes (e.g., 1,2,30 or ,,30 or 1,,)",
         options="Comma-separated list of prediction options",
         category="Category for the prediction (optional)"
     )
-    async def create_prediction(self, interaction: discord.Interaction, question: str, duration: int, options: str, category: str = None):
+    async def create_prediction(
+        self, 
+        interaction: discord.Interaction, 
+        question: str, 
+        options: str, 
+        duration: str,
+        category: str = None
+    ):
         # Immediately acknowledge the interaction
         await interaction.response.defer(ephemeral=False)
         
@@ -96,13 +103,29 @@ class Economy(commands.Cog):
             # Process options
             options_list = [opt.strip() for opt in options.split(",")]
             
-            # Validate
+            # Validate options
             if len(options_list) < 2:
                 await interaction.followup.send("You need at least two options for a prediction!", ephemeral=True)
                 return
             
+            # Process duration
+            duration_parts = duration.split(",")
+            if len(duration_parts) != 3:
+                await interaction.followup.send("Duration must be in format: days,hours,minutes (e.g., 1,2,30 or ,,30 or 1,,)", ephemeral=True)
+                return
+            
+            days = int(duration_parts[0]) if duration_parts[0].strip() else 0
+            hours = int(duration_parts[1]) if duration_parts[1].strip() else 0
+            minutes = int(duration_parts[2]) if duration_parts[2].strip() else 0
+            
+            # Calculate total minutes
+            total_minutes = (days * 24 * 60) + (hours * 60) + minutes
+            if total_minutes <= 0:
+                await interaction.followup.send("Duration must be greater than 0! Please specify days, hours, or minutes.", ephemeral=True)
+                return
+            
             # Create prediction object
-            end_time = datetime.datetime.utcnow() + datetime.timedelta(minutes=duration)
+            end_time = datetime.datetime.utcnow() + datetime.timedelta(minutes=total_minutes)
             new_prediction = Prediction(question, end_time, options_list, interaction.user.id, category)
             
             # Add to predictions list
@@ -111,18 +134,29 @@ class Economy(commands.Cog):
             # Schedule prediction resolution
             asyncio.create_task(self.schedule_prediction_resolution(new_prediction))
             
+            # Format duration string
+            duration_parts = []
+            if days > 0:
+                duration_parts.append(f"{days} day{'s' if days != 1 else ''}")
+            if hours > 0:
+                duration_parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+            if minutes > 0:
+                duration_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+            duration_str = ", ".join(duration_parts)
+            
             # Send confirmation message
             await interaction.followup.send(
                 f"Prediction created:\n"
                 f"Question: {question}\n"
                 f"Options: {', '.join(options_list)}\n"
-                f"Duration: {duration} minutes\n"
+                f"Duration: {duration_str}\n"
                 f"Category: {category if category else 'None'}",
                 ephemeral=True
             )
             
+        except ValueError:
+            await interaction.followup.send("Invalid duration format! Please use numbers in format: days,hours,minutes (e.g., 1,2,30 or ,,30 or 1,,)", ephemeral=True)
         except Exception as e:
-            # Error handling
             try:
                 await interaction.followup.send(f"Error creating prediction: {str(e)}", ephemeral=True)
             except:
