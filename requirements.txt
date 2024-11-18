@@ -3,3 +3,4 @@ aiosqlite
 discord.py
 python-dotenv
 jishaku==2.6.0
+aiohttp
