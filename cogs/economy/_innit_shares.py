@@ -143,41 +143,11 @@ class Prediction:
             }
         return prices
 
-class OptionButtonView(discord.ui.View):
-    def __init__(self, prediction, cog):
-        super().__init__(timeout=None)  # Make the view persistent
-        self.prediction = prediction
-        self.cog = cog
-        self.stored_interaction = None  # Store single interaction reference
-        self.update_buttons()
-        
-        # Store view reference
-        cog.active_views[prediction] = self
-
-    def update_buttons(self):
-        # Clear existing buttons
-        self.clear_items()
-        # Add updated buttons
-        for option in self.prediction.options:
-            button = OptionButton(label=option, prediction=self.prediction, cog=self.cog, view=self)
-            self.add_item(button)
-
-    async def refresh_view(self, interaction: discord.Interaction):
-        self.update_buttons()
-        if self.stored_interaction:
-            try:
-                await self.stored_interaction.edit_original_response(view=self)
-            except discord.NotFound:
-                # If the message was deleted, remove this view
-                if self.prediction in self.cog.active_views:
-                    del self.cog.active_views[self.prediction]
-
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.points_manager = bot.points_manager
         self.predictions = []
-        self.active_views = {}
 
     @app_commands.guild_only()
     @app_commands.command(name="create_prediction", description="Create a new prediction market")
@@ -373,10 +343,12 @@ class Economy(commands.Cog):
 
                         # Create buttons for the user to choose an option to bet on
                         class OptionButton(discord.ui.Button):
-                            def __init__(self, label, prediction, cog, view):
+                            def __init__(self, label, prediction, cog):
+                                # Get current prices for 100 point example
                                 prices = prediction.get_current_prices(100)
                                 price_info = prices[label]
                                 
+                                # Format the label to include price information
                                 detailed_label = (
                                     f"{label}\n"
                                     f"Price: {price_info['price_per_share']:.2f} pts/share"
@@ -385,7 +357,6 @@ class Economy(commands.Cog):
                                 self.prediction = prediction
                                 self.cog = cog
                                 self.option = label
-                                self.parent_view = view
 
                             async def callback(self, interaction: discord.Interaction):
                                 class AmountInput(discord.ui.Modal, title="Place Your Bet"):
@@ -431,14 +402,16 @@ class Economy(commands.Cog):
 
                                             # Transfer points and place bet
                                             await self.cog.points_manager.transfer_points(modal_interaction.user.id, self.cog.bot.user.id, amount)
-                                            if await self.cog.place_bet(modal_interaction.user.id, self.prediction, self.option, amount):
-                                                await modal_interaction.response.send_message(
-                                                    f"Bet placed successfully!\n"
-                                                    f"Amount: {amount:,} Points\n"
-                                                    f"Potential shares: {potential_shares:.2f}\n"
-                                                    f"Potential payout: {potential_payout:.2f} Points",
-                                                    ephemeral=True
-                                                )
+                                            self.prediction.place_bet(modal_interaction.user.id, self.option, amount)
+                                            
+                                            # Send confirmation
+                                            await modal_interaction.response.send_message(
+                                                f"✅ Bet placed: {amount:,} Points on '{self.option}'\n"
+                                                f"📈 Shares received: {potential_shares:.2f}\n"
+                                                f"💰 Potential payout if won: {potential_payout:.2f} points",
+                                                ephemeral=True
+                                            )
+
                                         except ValueError:
                                             await modal_interaction.response.send_message("Invalid amount entered!", ephemeral=True)
 
@@ -447,36 +420,13 @@ class Economy(commands.Cog):
 
                         class OptionButtonView(discord.ui.View):
                             def __init__(self, prediction, cog):
-                                super().__init__(timeout=None)  # Make the view persistent
-                                self.prediction = prediction
-                                self.cog = cog
-                                self.stored_interaction = None  # Store single interaction reference
-                                self.update_buttons()
-                                
-                                # Store view reference
-                                cog.active_views[prediction] = self
-
-                            def update_buttons(self):
-                                # Clear existing buttons
-                                self.clear_items()
-                                # Add updated buttons
-                                for option in self.prediction.options:
-                                    button = OptionButton(label=option, prediction=self.prediction, cog=self.cog, view=self)
+                                super().__init__()
+                                odds = prediction.get_odds()
+                                for option in prediction.options:
+                                    button = OptionButton(label=f"{option}", prediction=prediction, cog=cog)
                                     self.add_item(button)
 
-                            async def refresh_view(self, interaction: discord.Interaction):
-                                self.update_buttons()
-                                if self.stored_interaction:
-                                    try:
-                                        await self.stored_interaction.edit_original_response(view=self)
-                                    except discord.NotFound:
-                                        # If the message was deleted, remove this view
-                                        if self.prediction in self.cog.active_views:
-                                            del self.cog.active_views[self.prediction]
-
                         await interaction.response.send_message(content="Please select an option to bet on:", view=OptionButtonView(selected_prediction, self.cog), ephemeral=True)
-                        # Store the interaction reference
-                        OptionButtonView.stored_interaction = await interaction.original_response()
 
                 class PredictionSelectView(discord.ui.View):
                     def __init__(self, predictions, cog):
@@ -504,6 +454,7 @@ class Economy(commands.Cog):
                 await interaction.response.send_message("No active predictions at the moment.", ephemeral=True)
                 return
             
+            # Create main embed
             current_embed = discord.Embed(
                 title="🎲 Prediction Markets",
                 color=discord.Color.blue(),
@@ -514,81 +465,110 @@ class Economy(commands.Cog):
             active_markets = []
             inactive_markets = []
             resolved_markets = []
-            refunded_markets = []
+            refunded_markets = []  # New list for refunded markets
 
-            def calculate_normalized_probabilities(prices):
-                """Calculate normalized probabilities that sum to 100%"""
-                raw_odds = {opt: 1/price['price_per_share'] if price['price_per_share'] > 0 else 0 
-                           for opt, price in prices.items()}
-                total_odds = sum(raw_odds.values())
-                return {opt: (odds/total_odds * 100) if total_odds > 0 else 0 
-                       for opt, odds in raw_odds.items()}
-
-            def create_market_display(prediction, prices):
-                """Create a PolyMarket-style display for a prediction"""
-                probabilities = calculate_normalized_probabilities(prices)
-                
+            for prediction in self.predictions:
+                prices = prediction.get_current_prices(100)
                 market_text = (
                     f"**Category:** {prediction.category or 'None'}\n"
-                    f"**Total Volume:** {prediction.get_total_bets():,} Points\n"
-                    f"**Ends:** <t:{int(prediction.end_time.timestamp())}:R>\n\n"
-                    "**Current Odds:**\n"
+                    f"**Pool:** {prediction.get_total_bets():,} Points\n"
+                    f"**Current Prices:**\n"
+                    + "\n".join([
+                        f"• {opt}: {prices[opt]['price_per_share']:.2f} pts/share"
+                        for opt in prediction.options
+                    ]) + "\n"
+                    f"**Ends:** <t:{int(prediction.end_time.timestamp())}:R>"
                 )
 
-                # Create PolyMarket-style odds display
-                for opt in prediction.options:
-                    prob = probabilities[opt]
-                    price = prices[opt]['price_per_share']
-                    market_text += (
-                        f"```\n"
-                        f"{opt}\n"
-                        f"Price: {price:.3f} Points\n"
-                        f"Prob:  {prob:.1f}%\n"
-                        f"```\n"
-                    )
-
-                return market_text
+                if prediction.resolved:
+                    if prediction.refunded:
+                        market_text = (
+                            f"**Category:** {prediction.category or 'None'}\n"
+                            f"**Pool:** {prediction.get_total_bets():,} Points\n"
+                            f"**Ended:** <t:{int(prediction.end_time.timestamp())}:R>"
+                        )
+                        refunded_markets.append((prediction.question, market_text))  # Add to refunded markets
+                    else:
+                        market_text = (
+                            f"**Category:** {prediction.category or 'None'}\n"
+                            f"**Pool:** {prediction.get_total_bets():,} Points\n"
+                            f"**Winner:** {prediction.result}\n"
+                            f"**Ended:** <t:{int(prediction.end_time.timestamp())}:R>"
+                        )
+                        resolved_markets.append((prediction.question, market_text))
+                elif prediction.end_time <= datetime.datetime.utcnow():
+                    inactive_markets.append((prediction.question, market_text))
+                else:
+                    active_markets.append((prediction.question, market_text))
 
             def add_markets_to_embed(markets, title, embed):
                 if not markets:
                     return embed
                 
-                for question, prediction, prices in markets:
-                    embed.add_field(
-                        name=f"📊 {question}",
-                        value=create_market_display(prediction, prices),
-                        inline=False  # Make each market take full width
-                    )
+                MAX_FIELD_LENGTH = 1000  # Setting slightly below 1024 for safety
+                current_content = ""
+                field_count = 1
+                
+                for market_title, market_text in markets:
+                    market_entry = f"**{market_title}**\n{market_text}\n\n"
+                    
+                    # If this single entry is too long, split it
+                    if len(market_entry) > MAX_FIELD_LENGTH:
+                        # If there's existing content, add it as a field first
+                        if current_content:
+                            field_title = f"{title} ({field_count})" if field_count > 1 else title
+                            embed.add_field(name=field_title, value=current_content.strip(), inline=False)
+                            field_count += 1
+                            current_content = ""
+                        
+                        # Split the long entry into multiple fields
+                        parts = []
+                        remaining = market_entry
+                        while remaining:
+                            if len(remaining) <= MAX_FIELD_LENGTH:
+                                parts.append(remaining)
+                                break
+                            
+                            # Find the last newline before MAX_FIELD_LENGTH
+                            split_point = remaining[:MAX_FIELD_LENGTH].rfind('\n')
+                            if split_point == -1:
+                                split_point = MAX_FIELD_LENGTH
+                            
+                            parts.append(remaining[:split_point])
+                            remaining = remaining[split_point:].strip()
+                        
+                        # Add each part as a separate field
+                        for part in parts:
+                            field_title = f"{title} ({field_count})" if field_count > 1 else title
+                            embed.add_field(name=field_title, value=part.strip(), inline=False)
+                            field_count += 1
+                        
+                    # If adding this entry would exceed the limit, create a new field
+                    elif len(current_content) + len(market_entry) > MAX_FIELD_LENGTH:
+                        if current_content:
+                            field_title = f"{title} ({field_count})" if field_count > 1 else title
+                            embed.add_field(name=field_title, value=current_content.strip(), inline=False)
+                            field_count += 1
+                        current_content = market_entry
+                    else:
+                        current_content += market_entry
+                
+                # Add any remaining content
+                if current_content:
+                    field_title = f"{title} ({field_count})" if field_count > 1 else title
+                    embed.add_field(name=field_title, value=current_content.strip(), inline=False)
+                
                 return embed
 
-            # Process each prediction
-            for prediction in self.predictions:
-                prices = prediction.get_current_prices(100)
-                combined_data = (prediction.question, prediction, prices)
-
-                if prediction.resolved:
-                    if prediction.refunded:
-                        refunded_markets.append(combined_data)
-                    else:
-                        resolved_markets.append(combined_data)
-                elif prediction.end_time <= datetime.datetime.utcnow():
-                    inactive_markets.append(combined_data)
-                else:
-                    active_markets.append(combined_data)
-
-            # Add section headers and markets
+            # Add fields for each category
             if active_markets:
-                current_embed.add_field(name="🟢 Active Markets", value="\u200b", inline=False)
-                current_embed = add_markets_to_embed(active_markets, "Active Markets", current_embed)
+                current_embed = add_markets_to_embed(active_markets, "🟢 Active Markets", current_embed)
             if inactive_markets:
-                current_embed.add_field(name="🟡 Pending Resolution", value="\u200b", inline=False)
-                current_embed = add_markets_to_embed(inactive_markets, "Pending Resolution", current_embed)
+                current_embed = add_markets_to_embed(inactive_markets, "🟡 Pending Resolution", current_embed)
             if resolved_markets:
-                current_embed.add_field(name="⭐ Resolved Markets", value="\u200b", inline=False)
-                current_embed = add_markets_to_embed(resolved_markets, "Resolved Markets", current_embed)
-            if refunded_markets:
-                current_embed.add_field(name="💰 Refunded Markets", value="\u200b", inline=False)
-                current_embed = add_markets_to_embed(refunded_markets, "Refunded Markets", current_embed)
+                current_embed = add_markets_to_embed(resolved_markets, "⭐ Resolved Markets", current_embed)
+            if refunded_markets:  # Add refunded markets section
+                current_embed = add_markets_to_embed(refunded_markets, "💰 Refunded Markets", current_embed)
 
             current_embed.set_footer(text="Use /bet to place bets on active markets")
             await interaction.response.send_message(embed=current_embed, ephemeral=True)
@@ -695,35 +675,6 @@ class Economy(commands.Cog):
         view = discord.ui.View()
         view.add_item(PredictionSelect(unresolved_predictions, self))
         await interaction.followup.send("Please select a prediction to resolve:", view=view, ephemeral=True)
-
-    @commands.Cog.listener()
-    async def on_prediction_update(self, prediction: Prediction):
-        """Event listener for when a prediction is updated"""
-        if prediction in self.active_views:
-            view = self.active_views[prediction]
-            if view.stored_interaction:
-                try:
-                    await view.refresh_view(view.stored_interaction)
-                except:
-                    # If update fails, clean up the view
-                    del self.active_views[prediction]
-
-    async def update_prediction(self, prediction: Prediction):
-        """Call this method whenever a bet is placed"""
-        await self.on_prediction_update(prediction)
-
-    # Modify the bet placement logic to trigger updates
-    async def place_bet(self, user_id, prediction, option, amount):
-        success = prediction.place_bet(user_id, option, amount)
-        if success:
-            await self.update_prediction(prediction)
-        return success
-
-    async def cleanup_old_views(self):
-        """Remove views for resolved or expired predictions"""
-        for prediction in list(self.active_views.keys()):
-            if prediction.resolved or prediction.end_time <= datetime.datetime.utcnow():
-                del self.active_views[prediction]
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Economy(bot))
